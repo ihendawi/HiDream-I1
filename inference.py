@@ -66,23 +66,23 @@ def load_models(model_type):
         output_hidden_states=True,
         output_attentions=True,
         torch_dtype=torch.bfloat16
-    ).to("cuda:0")
+    ).to("cuda:1")
 
-    # Load image transformer on GPU 1
+    # Load image transformer on GPU 0
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="transformer",
         torch_dtype=torch.bfloat16
-    ).to("cuda:1")
+    ).to("cuda:0")
 
-    # Load pipeline to GPU 1 by default
+    # Load pipeline to GPU 0 by default
     pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,  # already on cuda:0
         torch_dtype=torch.bfloat16
-    ).to("cuda:1", torch.bfloat16)
+    ).to("cuda:0", torch.bfloat16)
 
     # Replace transformer after moving it to cuda:1
     pipe.transformer = transformer
@@ -122,7 +122,7 @@ def generate_image(pipe, model_type, prompt, resolution, seed):
     if seed == -1:
         seed = torch.randint(0, 1000000, (1,)).item()
     
-    generator = torch.Generator("cuda:1").manual_seed(seed)
+    generator = torch.Generator("cuda:0").manual_seed(seed)
     
     images = pipe(
         prompt,

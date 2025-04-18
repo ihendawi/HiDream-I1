@@ -5,6 +5,8 @@ from hi_diffusers import HiDreamImageTransformer2DModel
 from hi_diffusers.schedulers.fm_solvers_unipc import FlowUniPCMultistepScheduler
 from hi_diffusers.schedulers.flash_flow_match import FlashFlowMatchEulerDiscreteScheduler
 from transformers import LlamaForCausalLM, PreTrainedTokenizerFast
+from transformers import BitsAndBytesConfig
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_type", type=str, default="dev")
 args = parser.parse_args()
@@ -49,45 +51,54 @@ RESOLUTION_OPTIONS = [
 ]
 
 # Load models
+from transformers import BitsAndBytesConfig
+
 def load_models(model_type):
     config = MODEL_CONFIGS[model_type]
     pretrained_model_name_or_path = config["path"]
     scheduler = config["scheduler"](num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
 
-    # Load tokenizer (stays on CPU)
     tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
         LLAMA_MODEL_NAME,
         use_fast=False
     )
-    
-    # Load text encoder on GPU 0
+
+    # Quantization config for 4-bit LLaMA
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",   # or "fp4"
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+
+    # Load 4-bit quantized LLaMA (auto maps to available CUDA)
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
-        output_hidden_states=True,
-        output_attentions=True,
+        quantization_config=bnb_config,
+        device_map={"": 1},
         torch_dtype=torch.bfloat16
-    ).to("cuda:1")
+    )
 
-    # Load image transformer on GPU 0
+    # Load image transformer normally
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="transformer",
         torch_dtype=torch.bfloat16
-    ).to("cuda:0")
+    ).to("cuda:0")  # or cuda:1 based on your balance
 
-    # Load pipeline to GPU 0 by default
+    # Load pipeline to GPU 0
     pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
-        text_encoder_4=text_encoder_4,  # already on cuda:0
+        text_encoder_4=text_encoder_4,
         torch_dtype=torch.bfloat16
     ).to("cuda:0", torch.bfloat16)
 
-    # Replace transformer after moving it to cuda:1
     pipe.transformer = transformer
 
     return pipe, config
+
 
 # Parse resolution string to get height and width
 def parse_resolution(resolution_str):

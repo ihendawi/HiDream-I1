@@ -52,32 +52,41 @@ RESOLUTION_OPTIONS = [
 def load_models(model_type):
     config = MODEL_CONFIGS[model_type]
     pretrained_model_name_or_path = config["path"]
-    scheduler = MODEL_CONFIGS[model_type]["scheduler"](num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
-    
+    scheduler = config["scheduler"](num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
+
+    # Load tokenizer (stays on CPU)
     tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
         LLAMA_MODEL_NAME,
-        use_fast=False)
+        use_fast=False
+    )
     
+    # Load text encoder on GPU 0
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
         output_hidden_states=True,
         output_attentions=True,
-        torch_dtype=torch.bfloat16).to("cuda")
+        torch_dtype=torch.bfloat16
+    ).to("cuda:0")
 
+    # Load image transformer on GPU 1
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path, 
-        subfolder="transformer", 
-        torch_dtype=torch.bfloat16).to("cuda")
+        pretrained_model_name_or_path,
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    ).to("cuda:1")
 
+    # Load pipeline to GPU 1 by default
     pipe = HiDreamImagePipeline.from_pretrained(
-        pretrained_model_name_or_path, 
+        pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
-        text_encoder_4=text_encoder_4,
+        text_encoder_4=text_encoder_4,  # already on cuda:0
         torch_dtype=torch.bfloat16
-    ).to("cuda", torch.bfloat16)
+    ).to("cuda:1", torch.bfloat16)
+
+    # Replace transformer after moving it to cuda:1
     pipe.transformer = transformer
-    
+
     return pipe, config
 
 # Parse resolution string to get height and width
@@ -113,7 +122,7 @@ def generate_image(pipe, model_type, prompt, resolution, seed):
     if seed == -1:
         seed = torch.randint(0, 1000000, (1,)).item()
     
-    generator = torch.Generator("cuda").manual_seed(seed)
+    generator = torch.Generator("cuda:1").manual_seed(seed)
     
     images = pipe(
         prompt,
@@ -131,7 +140,7 @@ def generate_image(pipe, model_type, prompt, resolution, seed):
 print("Loading default model (full)...")
 pipe, _ = load_models(model_type)
 print("Model loaded successfully!")
-prompt = "A cat holding a sign that says \"Hi-Dreams.ai\"." 
+prompt = "Astronaut riding a horse." 
 resolution = "1024 × 1024 (Square)"
 seed = -1
 image, seed = generate_image(pipe, model_type, prompt, resolution, seed)

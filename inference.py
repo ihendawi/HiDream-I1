@@ -51,8 +51,6 @@ RESOLUTION_OPTIONS = [
 ]
 
 # Load models
-from transformers import BitsAndBytesConfig
-
 def load_models(model_type):
     config = MODEL_CONFIGS[model_type]
     pretrained_model_name_or_path = config["path"]
@@ -67,7 +65,7 @@ def load_models(model_type):
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",   # or "fp4"
+        bnb_4bit_quant_type="nf4",   
         bnb_4bit_compute_dtype=torch.bfloat16
     )
 
@@ -84,7 +82,7 @@ def load_models(model_type):
         pretrained_model_name_or_path,
         subfolder="transformer",
         torch_dtype=torch.bfloat16
-    ).to("cuda:0")  # or cuda:1 based on your balance
+    ).to("cuda:0")
 
     # Load pipeline to GPU 0
     pipe = HiDreamImagePipeline.from_pretrained(
